@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "windtiles"
+version = "0.1.0"
+description = "NOAA GFS 0.25° wind and hazard tiles for Aviation Weather"
+requires-python = ">=3.14"
+dependencies = ["eccodes", "numpy", "pillow"]
+
+[tool.setuptools]
+packages = ["windtiles"]
