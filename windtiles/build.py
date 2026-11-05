@@ -17,9 +17,9 @@ from windtiles.grid import LEVELS, ZOOMS, tile_grid, tile_nodes
 MANIFEST_URL = "https://aviation-weather-tiles.web.app/wind/v1/manifest.json"
 STEPS = list(range(3, 67, 3))
 MAX_AGE = timedelta(hours=18)
-KT_PER_MS = 1.943844
+KT_PER_MS = hazards.KT_PER_MS
 KELVIN = 273.15
-HAZARD_LEVELS = [*LEVELS[1:], "col"]
+HAZARD_LEVELS = [*LEVELS, "col"]
 STORM_POOL = 4  # max over ±2 nodes = ±0.5°: the model misplaces cells by tens of miles (README «Сверка»)
 NEIGHBORS = {500: (600, 400), 400: (500, 300), 300: (400, 250)}  # hPa → (below, above) for the vertical wind shear
 
@@ -31,7 +31,8 @@ INDEX_HTML = """<!doctype html>
 Changed: u, v in knots, T in °C, coarsened to 0.5° and 1°, 8 bits per value, masked below ground.
 Derived: turbulence index (Ellrod TI1), icing potential from T and RH, freezing level in hundreds of feet,
 thunderstorm index from CAPE and convective precipitation rate, its zones, CAPE and rate widened by 0.5°;
-turbulence and icing at 0.5° and 1° take the maximum around each node.</p>
+turbulence and icing at 0.5° and 1° take the maximum around each node;
+ceiling above ground in feet, capped at 12,000, visibility in statute miles, capped at 10, gust in knots.</p>
 </html>
 """
 
@@ -54,7 +55,10 @@ def level_fields(fields, level: str, step: int) -> tuple[np.ndarray, np.ndarray,
 def hazard_fields(fields, level: str, step: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Turbulence S (0 below 500 hPa), icing S (0 above 600 hPa), freezing level in hundreds of feet above sea level
     of a pressure level, NaN below ground; thunderstorm S, CAPE (J/kg), convective rate (mm/h) of "col", each widened
-    to its maximum within ±0.5°."""
+    to its maximum within ±0.5°; ceiling above ground (ft), visibility (SM), gust (kt) of "sfc"."""
+    if level == "sfc":
+        ceiling = hazards.ceiling_ft(fields[("ceiling", 0, step)], fields[("orog", 0, step)])
+        return ceiling, hazards.visibility_sm(fields[("vis", 0, step)]), hazards.gust_kt(fields[("gust", 0, step)])
     if level == "col":
         cape = fields[("cape", 0, step)]
         rate = hazards.convective_rate(fields[("cprat", 0, step)])
@@ -104,9 +108,9 @@ def _write_hazards(run: datetime, fields, out: Path, hazard_levels, steps) -> in
     for index, step in enumerate(steps):
         for level in hazard_levels:
             channels = hazard_fields(fields, level, step)
-            if index == 0:
+            if index == 0 and level != "sfc":
                 _hazard_summary(level, channels[: 1 if level == "col" else 2])
-            pooled = 0 if level == "col" else 2  # col is already widened in hazard_fields
+            pooled = 0 if level in ("col", "sfc") else 2  # col is already widened in hazard_fields; sfc has no S
             count += _write_tiles(out / f"hazards/v1/{_frame(run, step)}/{level}", channels, pooled)
     return count
 

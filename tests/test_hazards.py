@@ -1,6 +1,7 @@
 import numpy as np
 from windtiles.hazards import (
-    TI1_POINTS, convective_rate, deformation, freezing_fl, icing, max_pool, severity, thunderstorm, turbulence,
+    TI1_POINTS, ceiling_ft, convective_rate, deformation, freezing_fl, gust_kt, icing, max_pool, severity, thunderstorm,
+    turbulence, visibility_sm,
 )
 
 lon, lat = np.meshgrid(np.arange(-180, 180, 0.25), np.arange(-90, 90.25, 0.25))
@@ -33,6 +34,16 @@ def test_turbulence_of_ellrod_moderate():
 def test_icing():
     s = icing(np.array([265.15, 265.15, 275.15, 248.15, 257.15, 271.65]), np.array([95, 82.5, 100, 100, 95, 95]))
     assert np.allclose(s, [0.7, 0.35, 0, 0, 0.35, 0.35], atol=1e-6)
+
+def test_ceiling_is_above_ground_and_capped():
+    ceiling = ceiling_ft(np.array([1500.0, 19999.8, 9000.0, 100.0]), np.array([1200.0, 300.0, 100.0, 200.0]))
+    assert np.allclose(ceiling, [300 / 0.3048, 12_000, 12_000, 0])
+
+def test_visibility_is_capped_at_ten_miles():
+    assert np.allclose(visibility_sm(np.array([1609.344, 24135.0, 0.0])), [1, 10, 0])
+
+def test_gust_in_knots():
+    assert np.allclose(gust_kt(np.array([10.0])), [19.43844])
 
 def test_freezing_fl():
     fl = freezing_fl(np.array([2590.8, 2590.8, 2590.8, 0.0]), np.array([280.0, 270.0, 273.15, 280.0]))

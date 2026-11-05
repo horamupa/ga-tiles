@@ -25,7 +25,8 @@ def fields(sp_pa=101_325.0):
         f[("r", mb, 6)] = globe(50.0)
     for mb in TURBULENCE_MB:
         f[("gh", mb, 6)] = globe((1000 - mb) * 12.0)
-    surface = (("10u", 2.0), ("10v", 1.0), ("2t", 288.15), ("zero", 2590.8), ("cape", 800.0), ("cprat", 1.55 / 3600))
+    surface = (("10u", 2.0), ("10v", 1.0), ("2t", 288.15), ("zero", 2590.8), ("cape", 800.0), ("cprat", 1.55 / 3600),
+               ("ceiling", 1500.0), ("orog", 300.0), ("vis", 4828.032), ("gust", 10.0))
     for name, value in surface:
         f[(name, 0, 6)] = globe(value)
     return f
@@ -36,7 +37,7 @@ def test_frames_cover_three_to_sixty_six():
     assert times[0] == RUN + timedelta(hours=3) and times[-1] == RUN + timedelta(hours=66)
 
 def test_hazard_levels_and_neighbours():
-    assert HAZARD_LEVELS == ["900", "850", "800", "750", "700", "600", "500", "400", "300", "col"]
+    assert HAZARD_LEVELS == ["sfc", "900", "850", "800", "750", "700", "600", "500", "400", "300", "col"]
     assert NEIGHBORS == {500: (600, 400), 400: (500, 300), 300: (400, 250)}
 
 def test_manifest_lives_on_the_ga_project():
@@ -67,9 +68,9 @@ def test_levels_and_tile_count(tmp_path):
     count, dropped = build(RUN, fields(), tmp_path, steps=[6])
     assert not dropped
     folders = [*(tmp_path / f"wind/v1/{STEP}").iterdir(), *(tmp_path / f"hazards/v1/{STEP}").iterdir()]
-    assert len(folders) == 20
+    assert len(folders) == 21
     assert all(len(list(folder.rglob("*.png"))) == 42 for folder in folders)
-    assert count == 840 and count * len(STEPS) == 18_480
+    assert count == 882 and count * len(STEPS) == 19_404
 
 def test_build_writes_every_tile_and_the_manifest(tmp_path):
     count, _ = build(RUN, fields(), tmp_path, levels=["500"], hazard_levels=[], steps=[6])
@@ -107,6 +108,14 @@ def test_no_icing_above_600():
     assert np.allclose(hazard_fields(f, "600", 6)[1], 0.7)
     for level in ("500", "400", "300"):
         assert (hazard_fields(f, level, 6)[1] == 0).all()
+
+def test_surface_conditions_are_ceiling_above_ground_visibility_and_gust(tmp_path):
+    f = fields()
+    ceiling, visibility, gust = hazard_fields(f, "sfc", 6)
+    assert np.allclose(ceiling, 1200 / 0.3048) and np.allclose(visibility, 3) and np.allclose(gust, 19.43844)
+    count, dropped = build(RUN, f, tmp_path, levels=["500"], hazard_levels=["sfc"], steps=[6])
+    assert not dropped and (tmp_path / "hazards/v1/2026101900/2026101906/sfc/3/2/3.png").exists()
+
 
 def test_thunderstorm_reads_cape_and_cprat():
     s, cape, rate = hazard_fields(fields(), "col", 6)

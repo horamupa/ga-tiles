@@ -14,6 +14,11 @@ CAPE_POINTS = ((100, 0.0), (1500, 1.0))  # CAPE J/kg → factor
 RATE_POINTS = ((0.1, 0.0), (3, 1.0))  # convective rate mm/h → factor
 FREEZING_K = 273.15
 M_PER_FT = 0.3048
+M_PER_SM = 1609.344
+KT_PER_MS = 1.943844
+CEILING_CAP_FT = 12_000  # the top of the scale: no ceiling or a higher one
+VISIBILITY_CAP_SM = 10  # the top of the scale, as a METAR's 10SM
+NO_CEILING_M = 19_000  # GFS writes about 20 000 gpm where it has no ceiling
 
 
 def severity(values: np.ndarray, points: tuple) -> np.ndarray:
@@ -55,6 +60,22 @@ def icing(t_k: np.ndarray, rh: np.ndarray) -> np.ndarray:
 def freezing_fl(height_m: np.ndarray, t2m_k: np.ndarray) -> np.ndarray:
     """0 °C isotherm in hundreds of feet above sea level; 0 on frozen ground and where GFS gives no isotherm."""
     return np.where(t2m_k <= FREEZING_K, 0, height_m / M_PER_FT / 100).astype(np.float32)
+
+
+def ceiling_ft(ceiling_m: np.ndarray, orography_m: np.ndarray) -> np.ndarray:
+    """Ceiling above ground, ft, 0…`CEILING_CAP_FT`. GFS gives it above sea level: it never lies under its own terrain."""
+    above_ground = (ceiling_m - orography_m) / M_PER_FT
+    return np.clip(np.where(ceiling_m >= NO_CEILING_M, CEILING_CAP_FT, above_ground), 0, CEILING_CAP_FT).astype(np.float32)
+
+
+def visibility_sm(visibility_m: np.ndarray) -> np.ndarray:
+    """Surface visibility, statute miles, 0…`VISIBILITY_CAP_SM`."""
+    return np.clip(visibility_m / M_PER_SM, 0, VISIBILITY_CAP_SM).astype(np.float32)
+
+
+def gust_kt(gust_ms: np.ndarray) -> np.ndarray:
+    """Surface gust, kt."""
+    return (gust_ms * KT_PER_MS).astype(np.float32)
 
 
 def convective_rate(cprat: np.ndarray) -> np.ndarray:

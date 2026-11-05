@@ -26,13 +26,17 @@ FIELDS = {  # (name, level) of the .idx entries a build reads
     ("HGT", "0C isotherm"),
     ("CAPE", "180-0 mb above ground"),
     ("CPRAT", "surface"),
+    ("HGT", "cloud ceiling"),
+    ("HGT", "surface"),
+    ("VIS", "surface"),
+    ("GUST", "surface"),
 }
-NAMES = {("gh", "isothermZero"): "zero", ("cpr", "surface"): "cprat"}  # (shortName, typeOfLevel) → read_fields name
+NAMES = {("gh", "isothermZero"): "zero", ("cpr", "surface"): "cprat", ("gh", "cloudCeiling"): "ceiling"}  # (shortName, typeOfLevel) → read_fields name
 SFC_WIND = ["10u", "10v", "2t", "sp"]  # surface fields the wind tiles read
 PL_WIND = ["u", "v", "t"]  # pressure-level fields the wind tiles read on LEVELS
 WINDS = {"u", "v", "10u", "10v"}
 WIND_LIMIT = 150  # m/s; |wind| at or past it is a broken field
-RANGES = {  # K, K, Pa, m, %, m, J/kg, kg/m²/s
+RANGES = {  # K, K, Pa, m, %, m, J/kg, kg/m²/s, m, m, m, m/s
     "t": (150, 350),
     "2t": (150, 350),
     "sp": (30_000, 115_000),
@@ -41,6 +45,10 @@ RANGES = {  # K, K, Pa, m, %, m, J/kg, kg/m²/s
     "zero": (-1_000, 10_000),
     "cape": (-1, 20_000),
     "cprat": (-1e-6, 0.1),
+    "ceiling": (-1_000, 25_000),
+    "orog": (-1_000, 9_000),
+    "vis": (0, 100_000),
+    "gust": (0, 150),
 }
 
 
