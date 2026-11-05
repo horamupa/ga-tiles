@@ -1,0 +1,56 @@
+name: GA tiles
+on:
+  schedule:
+    - cron: "25 * * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Build the latest run even if it is already deployed
+        type: boolean
+        default: false
+concurrency:
+  group: tiles
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+      - run: pip install -r requirements.txt -e .
+      - run: python -I -m pytest -q
+      - id: build
+        run: python -I -m windtiles.build --out site --work "$RUNNER_TEMP/grib" ${{ inputs.force && '--force' || '' }}
+      - if: steps.build.outputs.changed == 'true'
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/380791025462/locations/global/workloadIdentityPools/github/providers/ga-tiles
+          service_account: tiles-deploy@aviation-weather-tiles.iam.gserviceaccount.com
+      # One release swaps the whole site: the tiles and the manifest of a run go live together.
+      - name: Deploy the run
+        if: steps.build.outputs.changed == 'true'
+        run: npx --yes firebase-tools@14 deploy --only hosting --non-interactive --message "run $(jq -r .run site/wind/v1/manifest.json)"
+  # GitHub turns off schedules of a public repository after 60 days without activity.
+  keepalive:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Keep the schedule alive
+        run: |
+          if [ $(( $(date +%s) - $(git log -1 --format=%ct) )) -gt $(( 30 * 86400 )) ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit --allow-empty -m "[save] Keep the hourly schedule alive"
+            git push
+          fi
