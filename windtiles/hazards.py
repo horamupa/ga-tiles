@@ -9,7 +9,8 @@ D = np.radians(STEP_DEG)
 LAT = np.radians(-90 + STEP_DEG * np.arange(NJ))[:, None]
 POLAR = np.abs(LAT[:, 0]) > np.radians(85)  # rows where x-spacing collapses
 
-TI1_POINTS = ((2, 0.0), (4, 0.25), (8, 0.5), (12, 0.75), (16, 1.0))  # TI1 in 1e-7 s⁻² → S
+# TI1 in 1e-7 s⁻² → S. Severe from 24, not Ellrod's 12 of a 1.25° grid: at 0.25° the 12 band held LGT and MOD reports only (README «Сверка»)
+TI1_POINTS = ((2, 0.0), (4, 0.25), (8, 0.5), (24, 0.75), (40, 1.0))
 CAPE_POINTS = ((100, 0.0), (1500, 1.0))  # CAPE J/kg → factor
 RATE_POINTS = ((0.1, 0.0), (3, 1.0))  # convective rate mm/h → factor
 FREEZING_K = 273.15

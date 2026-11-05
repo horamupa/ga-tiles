@@ -11,7 +11,7 @@ y = np.radians(lat) * R
 
 def test_severity_interpolates_and_keeps_nan():
     s = severity(np.array([1, 2, 3, 4, 6, 12, 20, np.nan]), TI1_POINTS)
-    assert np.allclose(s[:7], [0, 0, 0.125, 0.25, 0.375, 0.75, 1]) and np.isnan(s[7])
+    assert np.allclose(s[:7], [0, 0, 0.125, 0.25, 0.375, 0.5625, 0.6875]) and np.isnan(s[7])
 
 def test_deformation_of_stretching_and_shear():
     a = 4e-5
