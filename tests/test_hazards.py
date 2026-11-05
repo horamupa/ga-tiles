@@ -1,6 +1,6 @@
 import numpy as np
 from windtiles.hazards import (
-    TI1_POINTS, convective_rate, deformation, freezing_level, icing, max_pool, severity, thunderstorm, turbulence,
+    TI1_POINTS, convective_rate, deformation, freezing_fl, icing, max_pool, severity, thunderstorm, turbulence,
 )
 
 lon, lat = np.meshgrid(np.arange(-180, 180, 0.25), np.arange(-90, 90.25, 0.25))
@@ -34,22 +34,12 @@ def test_icing():
     s = icing(np.array([265.15, 265.15, 275.15, 248.15, 257.15, 271.65]), np.array([95, 82.5, 100, 100, 95, 95]))
     assert np.allclose(s, [0.7, 0.35, 0, 0, 0.35, 0.35], atol=1e-6)
 
-def test_freezing_level_between_850_and_700():
-    t = {1000: 287.15, 925: 283.15, 850: 278.15, 700: 268.15, 600: 261.15, 500: 252.15, 400: 241.15, 300: 228.15}
-    fl = freezing_level(np.array([288.15]), np.array([101_325.0]), {k: np.array([v]) for k, v in t.items()})
-    assert abs(fl[0] - 73.3) < 0.5  # 850 hPa 4 779 ft, 700 hPa 9 878 ft, середина
-
-def test_freezing_level_starts_at_the_ground():
-    t = {850: 283.15, 700: 268.15, 600: 261.15, 500: 252.15, 400: 241.15, 300: 228.15}
-    fl = freezing_level(np.array([278.15]), np.array([80_000.0]), {k: np.array([v]) for k, v in t.items()})
-    assert abs(fl[0] - 81.4) < 0.5  # земля на 800 hPa (6 392 ft), 850 под землёй не считается
-
-def test_freezing_level_is_zero_on_frozen_ground():
-    fl = freezing_level(np.array([272.15]), np.array([101_325.0]), {850: np.array([276.15]), 700: np.array([268.15])})
-    assert fl[0] == 0
+def test_freezing_fl():
+    fl = freezing_fl(np.array([2590.8, 2590.8, 2590.8, 0.0]), np.array([280.0, 270.0, 273.15, 280.0]))
+    assert np.allclose(fl, [85.0, 0, 0, 0])
 
 def test_convective_rate():
-    assert np.allclose(convective_rate(np.array([0.006, 0.002]), np.array([0.003, 0.0021])), [1.0, 0.0])
+    assert np.allclose(convective_rate(np.array([0.001, -1e-6])), [3.6, 0])
 
 def test_thunderstorm():
     s = thunderstorm(np.array([1500, 100, 800, 3000]), np.array([3, 5, 1.55, 0.05]))

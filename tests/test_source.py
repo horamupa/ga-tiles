@@ -1,4 +1,6 @@
 from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from threading import Thread
 import eccodes
 import numpy as np
 import pytest
@@ -34,6 +36,26 @@ def grib(path, ni=1440, nj=721, step_deg=0.25, first_lat=90.0, keys=None, values
 
 def entry(name, level, forecast="6 hour fcst", start=0, end=None):
     return IdxEntry(name, level, forecast, start, end)
+
+def test_exists_is_a_head_request():
+    class Handler(BaseHTTPRequestHandler):  # only HEAD: a GET gets 501 and reads as absent
+        def do_HEAD(self):
+            self.send_response(200 if self.path == "/f066.idx" else 404)
+            self.end_headers()
+
+        def log_message(self, *args):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        assert source.exists(f"{base}/f066.idx") is True
+        assert source.exists(f"{base}/f069.idx") is False
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert source.exists(f"{base}/f066.idx") is False  # nothing listens now
 
 def test_file_url():
     assert file_url(RUN, 66) == (
@@ -98,14 +120,22 @@ def test_byte_ranges_join_neighbours():
     ]
     assert byte_ranges(entries) == [(0, 199), (300, None)]
 
-def test_download_asks_only_wanted_ranges(tmp_path):
-    idx = (
-        "1:0:d=2026110512:HGT:1 hybrid level:6 hour fcst:\n"
-        "2:100:d=2026110512:UGRD:850 mb:6 hour fcst:\n"
-        "3:200:d=2026110512:VGRD:850 mb:6 hour fcst:\n"
-        "4:300:d=2026110512:CPRAT:surface:0-6 hour ave fcst:\n"
-        "5:400:d=2026110512:CPRAT:surface:6 hour fcst:\n"
+def idx_of(rows):
+    return "".join(
+        f"{number}:{(number - 1) * 100}:d=2026110512:{name}:{level}:{forecast}:\n"
+        for number, (name, level, forecast) in enumerate(rows, start=1)
     )
+
+def test_download_asks_only_wanted_ranges(tmp_path):
+    first = [("UGRD", "850 mb"), ("VGRD", "850 mb")]
+    last = ("CPRAT", "surface")
+    idx = idx_of([
+        ("HGT", "1 hybrid level", "6 hour fcst"),
+        *((name, level, "6 hour fcst") for name, level in first),
+        ("CPRAT", "surface", "0-6 hour ave fcst"),
+        (*last, "6 hour fcst"),
+        *((name, level, "6 hour fcst") for name, level in sorted(source.FIELDS - {*first, last})),
+    ])
     calls = []
 
     def fetch(url, range_header):
@@ -117,6 +147,17 @@ def test_download_asks_only_wanted_ranges(tmp_path):
     assert calls == [(url + ".idx", None), (url, "bytes=100-299"), (url, "bytes=400-")]
     assert paths == [tmp_path / "work" / "f006.grib2"]
     assert paths[0].read_bytes() == b"bytes=100-299bytes=400-"
+
+def test_download_refuses_a_step_without_a_wanted_field(tmp_path):
+    complete = {(name, level, "9 hour fcst") for name, level in source.FIELDS}
+    idx = idx_of(sorted(complete - {("CPRAT", "surface", "9 hour fcst")}))
+
+    def fetch(url, range_header):
+        assert url.endswith(".idx")  # nothing is fetched for a step that cannot be complete
+        return idx.encode()
+
+    with pytest.raises(ValueError, match=r"step 9: .*CPRAT"):
+        source.download(RUN, [9], tmp_path / "work", fetch)
 
 def test_reads_and_normalizes_a_global_field(tmp_path):
     fields = read_fields([grib(tmp_path / "pl.grib2")])
@@ -160,6 +201,7 @@ def test_rejects_values_out_of_range(tmp_path, keys, valid, value):
 
 @pytest.mark.parametrize("keys, valid, value, name", [
     ({"shortName": "gh"}, 10_000.0, 30_000, "gh 250 6"), ({"shortName": "r"}, 50.0, 200, "r 250 6"),
+    ({"shortName": "r"}, 50.0, -11, "r 250 6"),
     (ZERO, 3_000.0, 11_000, "zero 0 6"), (ZERO, 3_000.0, -1_100, "zero 0 6"),
     (CAPE, 500.0, 25_000, "cape 0 6"), (CAPE, 500.0, -2, "cape 0 6"),
     (CPRAT, 0.001, 0.2, "cprat 0 6"), (CPRAT, 0.001, -1e-5, "cprat 0 6"),

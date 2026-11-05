@@ -12,7 +12,7 @@ import numpy as np
 from windtiles.grid import LEVELS, NI, NJ, STEP_DEG, normalize
 
 BUCKET = "https://noaa-gfs-bdp-pds.s3.amazonaws.com"
-WIND_MB = [900, 850, 800, 750, 700, 600, 500, 400, 300]
+WIND_MB = [int(level) for level in LEVELS if level != "sfc"]
 ICING_MB = [900, 850, 800, 750, 700, 600]
 TURBULENCE_MB = [600, 500, 400, 300, 250]
 FIELDS = {  # (name, level) of the .idx entries a build reads
@@ -89,6 +89,15 @@ def byte_ranges(entries: list[IdxEntry]) -> list[tuple[int, int | None]]:
     return ranges
 
 
+def exists(url: str) -> bool:
+    """HEAD request; any HTTP or network error reads as absent."""
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, method="HEAD"), timeout=30):
+            return True
+    except OSError:
+        return False
+
+
 def _fetch(url: str, range_header: str | None) -> bytes:
     headers = {"Range": range_header} if range_header else {}
     with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=60) as response:
@@ -98,12 +107,15 @@ def _fetch(url: str, range_header: str | None) -> bytes:
 def download(
     run: datetime, steps: list[int], directory: Path, fetch: Callable[[str, str | None], bytes] = _fetch
 ) -> list[Path]:
-    """Wanted fields of each step into f{step:03}.grib2. A failure stops the run; the next hour tries again."""
+    """Wanted fields of each step into f{step:03}.grib2. A failure or an incomplete .idx stops the run;
+    the next hour tries again."""
     directory.mkdir(parents=True, exist_ok=True)
     paths = []
     for step in steps:
         url = file_url(run, step)
         entries = [entry for entry in parse_idx(fetch(url + ".idx", None).decode()) if wanted(entry, step)]
+        if missing := FIELDS - {(entry.name, entry.level) for entry in entries}:
+            raise ValueError(f"step {step}: no {sorted(missing)} in the .idx")
         path = directory / f"f{step:03}.grib2"
         with open(path, "wb") as file:
             for start, end in byte_ranges(entries):

@@ -1,11 +1,14 @@
 import numpy as np
-from windtiles.grid import NI, NJ, normalize, tile_grid, tile_nodes
+from windtiles.grid import LEVELS, NI, NJ, normalize, tile_grid, tile_nodes
 
 def lon_lat_globe():
     """globe[j, i] = (lat, lon) of node j from 90S, i from 180W, packed as lat * 1000 + lon."""
     lat = -90 + 0.25 * np.arange(NJ)[:, None]
     lon = -180 + 0.25 * np.arange(NI)[None, :]
     return (lat * 1000 + lon).astype(np.float64)
+
+def test_levels():
+    assert LEVELS == ["sfc", "900", "850", "800", "750", "700", "600", "500", "400", "300"]
 
 def test_tile_counts():
     assert [r * c for r, c in map(tile_grid, (1, 2, 3))] == [2, 8, 32]

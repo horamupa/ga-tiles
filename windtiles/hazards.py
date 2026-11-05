@@ -10,9 +10,10 @@ LAT = np.radians(-90 + STEP_DEG * np.arange(NJ))[:, None]
 POLAR = np.abs(LAT[:, 0]) > np.radians(85)  # rows where x-spacing collapses
 
 TI1_POINTS = ((2, 0.0), (4, 0.25), (8, 0.5), (12, 0.75), (16, 1.0))  # TI1 in 1e-7 s⁻² → S
-CAPE_POINTS = ((100, 0.0), (1500, 1.0))  # MUCAPE J/kg → factor
+CAPE_POINTS = ((100, 0.0), (1500, 1.0))  # CAPE J/kg → factor
 RATE_POINTS = ((0.1, 0.0), (3, 1.0))  # convective rate mm/h → factor
 FREEZING_K = 273.15
+M_PER_FT = 0.3048
 
 
 def severity(values: np.ndarray, points: tuple) -> np.ndarray:
@@ -51,34 +52,19 @@ def icing(t_k: np.ndarray, rh: np.ndarray) -> np.ndarray:
     return (0.7 * f * g).astype(np.float32)
 
 
-def pressure_altitude_ft(p_pa: np.ndarray) -> np.ndarray:
-    """ISA pressure altitude, ft."""
-    return 145366.45 * (1 - (p_pa / 101325) ** 0.190284)
+def freezing_fl(height_m: np.ndarray, t2m_k: np.ndarray) -> np.ndarray:
+    """0 °C isotherm in hundreds of feet above sea level; 0 on frozen ground and where GFS gives no isotherm."""
+    return np.where(t2m_k <= FREEZING_K, 0, height_m / M_PER_FT / 100).astype(np.float32)
 
 
-def freezing_level(t2m_k: np.ndarray, sp_pa: np.ndarray, temperatures: dict[int, np.ndarray]) -> np.ndarray:
-    """Lowest 0 °C crossing above ground as FL (hundreds of ft); 0 on frozen ground, NaN if none."""
-    fl = np.full(np.shape(t2m_k), np.nan, np.float32)
-    t0, z0 = t2m_k, pressure_altitude_ft(sp_pa)
-    for hpa in sorted(temperatures, reverse=True):
-        t1, z1 = temperatures[hpa], pressure_altitude_ft(hpa * 100.0)
-        above = hpa * 100 < sp_pa
-        cross = above & np.isnan(fl) & (t0 > FREEZING_K) & (t1 <= FREEZING_K)
-        with np.errstate(divide="ignore", invalid="ignore"):  # t0 == t1 only off the crossing
-            z = z0 + (z1 - z0) * (t0 - FREEZING_K) / (t0 - t1)
-        fl = np.where(cross, z / 100, fl)
-        t0, z0 = np.where(above, t1, t0), np.where(above, z1, z0)
-    return np.where(t2m_k <= FREEZING_K, 0, fl).astype(np.float32)
+def convective_rate(cprat: np.ndarray) -> np.ndarray:
+    """Convective precipitation rate, mm/h, from kg/m²/s."""
+    return np.maximum(cprat * 3600, 0).astype(np.float32)
 
 
-def convective_rate(cp: np.ndarray, cp_before: np.ndarray) -> np.ndarray:
-    """Convective precipitation rate over the last 3 h, mm/h, from accumulated cp in m."""
-    return np.maximum((cp - cp_before) * 1000 / 3, 0).astype(np.float32)
-
-
-def thunderstorm(mucape: np.ndarray, rate: np.ndarray) -> np.ndarray:
+def thunderstorm(cape: np.ndarray, rate: np.ndarray) -> np.ndarray:
     """Thunderstorm severity √(CAPE factor × rate factor)."""
-    return np.sqrt(severity(mucape, CAPE_POINTS) * severity(rate, RATE_POINTS))
+    return np.sqrt(severity(cape, CAPE_POINTS) * severity(rate, RATE_POINTS))
 
 
 def max_pool(globe: np.ndarray, stride: int) -> np.ndarray:

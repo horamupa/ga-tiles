@@ -1,4 +1,4 @@
-"""Build one ECMWF run into PNG wind and hazard tiles, the manifest and index.html."""
+"""Build one GFS run into PNG wind and hazard tiles, the manifest and index.html."""
 
 import argparse
 import json
@@ -14,37 +14,24 @@ from windtiles import hazards, source
 from windtiles.encode import encode_tile
 from windtiles.grid import LEVELS, ZOOMS, tile_grid, tile_nodes
 
-MANIFEST_URL = "https://pilot-force-tiles.web.app/wind/v1/manifest.json"
-STEPS = list(range(6, 67, 3))
+MANIFEST_URL = "https://aviation-weather-tiles.web.app/wind/v1/manifest.json"
+STEPS = list(range(3, 67, 3))
 MAX_AGE = timedelta(hours=18)
 KT_PER_MS = 1.943844
 KELVIN = 273.15
-HAZARD_LEVELS = ["850", "700", "500", "400", "300", "250", "200", "150", "col"]
+HAZARD_LEVELS = [*LEVELS[1:], "col"]
 STORM_POOL = 4  # max over ±2 nodes = ±0.5°: the model misplaces cells by tens of miles (README «Сверка»)
-NEIGHBORS = {  # hPa → (below, above) for the vertical wind shear
-    850: (925, 700),
-    700: (850, 600),
-    500: (600, 400),
-    400: (500, 300),
-    300: (400, 250),
-    250: (300, 200),
-    200: (250, 150),
-    150: (200, 100),
-}
+NEIGHBORS = {500: (600, 400), 400: (500, 300), 300: (400, 250)}  # hPa → (below, above) for the vertical wind shear
 
 INDEX_HTML = """<!doctype html>
 <html lang="en">
 <meta charset="utf-8">
-<title>Pilot Force wind tiles</title>
-<p>Wind tiles for Pilot Force. This service is based on data and products of the European Centre
-for Medium-Range Weather Forecasts (<a href="https://www.ecmwf.int">ECMWF</a>).
-Copyright © {year} ECMWF. Licence <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>.
+<title>Aviation Weather wind tiles</title>
+<p>Wind tiles for Aviation Weather. Based on NOAA GFS 0.25° data, public domain. NOAA does not endorse this service.
 Changed: u, v in knots, T in °C, coarsened to 0.5° and 1°, 8 bits per value, masked below ground.
-Derived: turbulence index (Ellrod TI1), icing potential from T and RH, freezing level, thunderstorm index
-from MUCAPE and convective precipitation, its zones, MUCAPE and rate widened by 0.5°; turbulence and icing at 0.5° and 1° take
-the maximum around each node.
-ECMWF does not accept any liability whatsoever for any error or omission in the data, their availability,
-or for any loss or damage arising from their use.</p>
+Derived: turbulence index (Ellrod TI1), icing potential from T and RH, freezing level in hundreds of feet,
+thunderstorm index from CAPE and convective precipitation rate, its zones, CAPE and rate widened by 0.5°;
+turbulence and icing at 0.5° and 1° take the maximum around each node.</p>
 </html>
 """
 
@@ -65,19 +52,22 @@ def level_fields(fields, level: str, step: int) -> tuple[np.ndarray, np.ndarray,
 
 
 def hazard_fields(fields, level: str, step: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Turbulence S, icing S, freezing level FL of a pressure level, NaN below ground;
-    thunderstorm S, MUCAPE (J/kg), convective rate (mm/h) of "col", each widened to its maximum within ±0.5°."""
+    """Turbulence S (0 below 500 hPa), icing S (0 above 600 hPa), freezing level FL of a pressure level,
+    NaN below ground; thunderstorm S, CAPE (J/kg), convective rate (mm/h) of "col", each widened to its maximum
+    within ±0.5°."""
     if level == "col":
-        mucape = fields[("mucape", 0, step)]
-        rate = hazards.convective_rate(fields[("cp", 0, step)], fields[("cp", 0, step - 3)])
-        return tuple(hazards.max_pool(x, STORM_POOL) for x in (hazards.thunderstorm(mucape, rate), mucape, rate))
+        cape = fields[("cape", 0, step)]
+        rate = hazards.convective_rate(fields[("cprat", 0, step)])
+        return tuple(hazards.max_pool(x, STORM_POOL) for x in (hazards.thunderstorm(cape, rate), cape, rate))
     hpa = int(level)
     sp = fields[("sp", 0, step)]
-    below, above = ((fields[("u", p, step)], fields[("v", p, step)], fields[("gh", p, step)]) for p in NEIGHBORS[hpa])
-    turbulence = hazards.turbulence(fields[("u", hpa, step)], fields[("v", hpa, step)], below, above)
-    icing = hazards.icing(fields[("t", hpa, step)], fields[("r", hpa, step)])
-    temperatures = {p: fields[("t", p, step)] for p in source.PL_LEVELS if p >= 300}
-    freezing = hazards.freezing_level(fields[("2t", 0, step)], sp, temperatures)
+    turbulence = icing = np.zeros_like(sp)
+    if hpa in NEIGHBORS:
+        below, above = (tuple(fields[(name, p, step)] for name in ("u", "v", "gh")) for p in NEIGHBORS[hpa])
+        turbulence = hazards.turbulence(fields[("u", hpa, step)], fields[("v", hpa, step)], below, above)
+    if hpa in source.ICING_MB:
+        icing = hazards.icing(fields[("t", hpa, step)], fields[("r", hpa, step)])
+    freezing = hazards.freezing_fl(fields[("zero", 0, step)], fields[("2t", 0, step)])
     ground = sp < hpa * 100
     return tuple(np.where(ground, np.nan, x).astype(np.float32) for x in (turbulence, icing, freezing))
 
@@ -100,7 +90,7 @@ def build(run: datetime, fields, out: Path, levels=LEVELS, hazard_levels=HAZARD_
         print(f"skip hazards: {error!r}")
     manifest = {"run": _iso(run), "frames": [_iso(run + timedelta(hours=step)) for step in steps]}
     (out / "wind/v1/manifest.json").write_text(json.dumps(manifest))
-    (out / "index.html").write_text(INDEX_HTML.format(year=run.year))
+    (out / "index.html").write_text(INDEX_HTML)
     return count
 
 
@@ -172,16 +162,17 @@ def decide(latest: datetime, deployed: datetime | None, now: datetime) -> str:
 
 
 def main(argv=None) -> int:
-    from ecmwf.opendata import Client
-
     parser = argparse.ArgumentParser(prog="windtiles.build")
     parser.add_argument("--out", type=Path, required=True, help="site directory")
     parser.add_argument("--work", type=Path, required=True, help="GRIB download directory, outside the repository")
     parser.add_argument("--force", action="store_true", help="build without comparing with the deployed run")
     args = parser.parse_args(argv)
 
-    client = Client(source=source.SOURCE)
-    run = source.latest_run(client)
+    run = source.latest_run(datetime.now(timezone.utc), source.exists)
+    if run is None:
+        print("no GFS run with step 66 in the last 24 hours")
+        _output(changed=False)
+        return 1
     if not args.force:
         deployed = deployed_run()
         decision = decide(run, deployed, datetime.now(timezone.utc))
@@ -194,7 +185,7 @@ def main(argv=None) -> int:
             return 1 if decision == "stale" else 0
 
     print(f"building run {_iso(run)}")
-    fields = source.read_fields(source.download(client, run, STEPS, args.work))
+    fields = source.read_fields(source.download(run, STEPS, args.work))
     print(f"{build(run, fields, args.out)} tiles in {args.out}")
     _output(changed=True)
     return 0

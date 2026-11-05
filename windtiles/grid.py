@@ -9,7 +9,7 @@ CELLS = 180  # cells per tile side
 NODES = 181  # nodes per tile side
 
 ZOOMS: dict[int, int] = {1: 4, 2: 2, 3: 1}  # zoom → stride in 0.25° nodes
-LEVELS: list[str] = ["sfc", "850", "700", "500", "400", "300", "250", "200", "150"]
+LEVELS: list[str] = ["sfc", "900", "850", "800", "750", "700", "600", "500", "400", "300"]
 
 
 def tile_grid(zoom: int) -> tuple[int, int]:
