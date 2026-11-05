@@ -1,4 +1,4 @@
-"""Check hazard thresholds of the latest ECMWF run against AWC PIREPs/AIREPs and convective SIGMETs.
+"""Check hazard thresholds of the latest GFS run against AWC PIREPs/AIREPs and convective SIGMETs.
 
 Not part of the package or CI. Run from the repository root with an isolated interpreter:
 
@@ -7,7 +7,7 @@ Not part of the package or CI. Run from the repository root with an isolated int
 `--work` holds the GRIB downloads and AWC answers of one run (outside the repository); a rerun with the
 same directory reuses them. Prints, for the current thresholds and for thresholds × 0.75, 1.5 and 2:
 MOD+ turbulence reports at FL200+ inside S ≥ 0.25, the share of the globe with turbulence S ≥ 0.5 on
-300/250/200 hPa, and the share of convective SIGMET area under thunderstorm S ≥ 0.25.
+500/400/300 hPa, and the share of convective SIGMET area under thunderstorm S ≥ 0.25.
 """
 
 import argparse
@@ -21,13 +21,13 @@ import numpy as np
 from windtiles import build, hazards, source
 from windtiles.grid import NI, NJ, STEP_DEG
 
-STEPS = [6, 9, 12, 15]
+STEPS = [3, 6, 9, 12]
 FACTORS = [1, 0.75, 1.5, 2]
 AWC = "https://aviationweather.gov/api/data/"
 PIREP_URL = AWC + "pirep?format=json&bbox=-90,-180,90,180&age=3&inten=lgt"  # HazardService.pilotReportRequest
 SIGMET_URL = AWC + "sigmet?format=json"  # HazardService.sigmetRequest(hour: 0)
-REPORT_LEVELS = [400, 300, 250, 200, 150]  # hPa, nearest to the report's FL
-AREA_LEVELS = [300, 250, 200]
+REPORT_LEVELS = [500, 400, 300]  # hPa, nearest to the report's FL
+AREA_LEVELS = [500, 400, 300]
 MODERATE = {"MOD", "MOD-SEV", "SEV", "SEV-EXTM", "EXTM"}
 LIGHT_MODERATE = MODERATE | {"LGT-MOD"}
 CONVECTIVE = {"TS", "CONV", "CB"}
@@ -40,7 +40,7 @@ LON_DEG = -180 + STEP_DEG * np.arange(NI)
 def fetch_json(url: str, path: Path):
     """AWC answer, cached in `path`; 204 or an empty body is an empty list."""
     if not path.exists():
-        request = urllib.request.Request(url, headers={"User-Agent": "wind-tiles calibrate"})
+        request = urllib.request.Request(url, headers={"User-Agent": "ga-tiles calibrate"})
         with urllib.request.urlopen(request, timeout=60) as response:
             path.write_bytes(response.read() or b"[]")
     return json.loads(path.read_text() or "[]")
@@ -137,18 +137,18 @@ def nearest_step(run: datetime, time: datetime) -> int:
 
 
 def main(argv=None) -> int:
-    from ecmwf.opendata import Client
-
     parser = argparse.ArgumentParser(prog="calibrate")
     parser.add_argument("--work", type=Path, required=True, help="download directory, outside the repository")
     args = parser.parse_args(argv)
 
-    client = Client(source=source.SOURCE)
-    run = source.latest_run(client)
+    run = source.latest_run(datetime.now(timezone.utc), source.exists)
+    if run is None:
+        print("no GFS run with step 66 in the last 24 hours")
+        return 1
     work = args.work / f"{run:%Y%m%d%H}"
-    paths = [work / "pl.grib2", work / "sfc.grib2"]
+    paths = [work / f"f{step:03}.grib2" for step in STEPS]
     if not all(p.exists() for p in paths):
-        paths = source.download(client, run, STEPS, work)
+        paths = source.download(run, STEPS, work)
     fields = source.read_fields(paths)
     pireps = fetch_json(PIREP_URL, work / "pirep.json")
     sigmets = fetch_json(SIGMET_URL, work / "sigmet.json")
@@ -166,7 +166,7 @@ def main(argv=None) -> int:
     print(f"PIREP/AIREP: {len(pireps)} total, FL200+ MOD+ {len(moderate)}, FL200+ LGT-MOD+ {len(light_moderate)}")
     print(f"convective SIGMET rings: {len(rings)}, {storm_mask.sum()} nodes, frame +{storm_step} h")
     print()
-    print(f"{'factor':>6} {'MOD+ hits':>12} {'LGT-MOD+ hits':>14} {'S≥0.5 area 300/250/200':>24} {'SIGMET under S≥0.25':>20}")
+    print(f"{'factor':>6} {'MOD+ hits':>12} {'LGT-MOD+ hits':>14} {'S≥0.5 area 500/400/300':>24} {'SIGMET under S≥0.25':>20}")
     for factor in FACTORS:
         turbulence, storms = severities(fields, factor)
         areas = [np.mean([area_share(turbulence[(hpa, s)], 0.5) for s in STEPS]) for hpa in AREA_LEVELS]
