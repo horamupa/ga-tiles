@@ -52,9 +52,9 @@ def level_fields(fields, level: str, step: int) -> tuple[np.ndarray, np.ndarray,
 
 
 def hazard_fields(fields, level: str, step: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Turbulence S (0 below 500 hPa), icing S (0 above 600 hPa), freezing level FL of a pressure level,
-    NaN below ground; thunderstorm S, CAPE (J/kg), convective rate (mm/h) of "col", each widened to its maximum
-    within ±0.5°."""
+    """Turbulence S (0 below 500 hPa), icing S (0 above 600 hPa), freezing level in hundreds of feet above sea level
+    of a pressure level, NaN below ground; thunderstorm S, CAPE (J/kg), convective rate (mm/h) of "col", each widened
+    to its maximum within ±0.5°."""
     if level == "col":
         cape = fields[("cape", 0, step)]
         rate = hazards.convective_rate(fields[("cprat", 0, step)])
@@ -72,11 +72,14 @@ def hazard_fields(fields, level: str, step: int) -> tuple[np.ndarray, np.ndarray
     return tuple(np.where(ground, np.nan, x).astype(np.float32) for x in (turbulence, icing, freezing))
 
 
-def build(run: datetime, fields, out: Path, levels=LEVELS, hazard_levels=HAZARD_LEVELS, steps=None) -> int:
-    """Wind tiles, then hazard tiles of every level and step, then the manifest and index.html; returns the tile count.
-    A hazard data failure drops every hazard tile and keeps the wind."""
+def build(
+    run: datetime, fields, out: Path, levels=LEVELS, hazard_levels=HAZARD_LEVELS, steps=None
+) -> tuple[int, bool]:
+    """Wind tiles, then hazard tiles of every level and step, then the manifest and index.html; returns the tile count
+    and whether the hazards were dropped. A hazard data failure drops every hazard tile and keeps the wind."""
     steps = STEPS if steps is None else steps
     count = 0
+    dropped = False
     for index, step in enumerate(steps):
         for level in levels:
             u, v, t = level_fields(fields, level, step)
@@ -87,11 +90,12 @@ def build(run: datetime, fields, out: Path, levels=LEVELS, hazard_levels=HAZARD_
         count += _write_hazards(run, fields, out, hazard_levels, steps)
     except (KeyError, ValueError) as error:
         shutil.rmtree(out / "hazards", ignore_errors=True)
+        dropped = True
         print(f"skip hazards: {error!r}")
     manifest = {"run": _iso(run), "frames": [_iso(run + timedelta(hours=step)) for step in steps]}
     (out / "wind/v1/manifest.json").write_text(json.dumps(manifest))
     (out / "index.html").write_text(INDEX_HTML)
-    return count
+    return count, dropped
 
 
 def _write_hazards(run: datetime, fields, out: Path, hazard_levels, steps) -> int:
@@ -173,8 +177,8 @@ def main(argv=None) -> int:
         print("no GFS run with step 66 in the last 24 hours")
         _output(changed=False)
         return 1
+    deployed = deployed_run()
     if not args.force:
-        deployed = deployed_run()
         decision = decide(run, deployed, datetime.now(timezone.utc))
         if decision != "build":
             if decision == "stale":
@@ -186,7 +190,16 @@ def main(argv=None) -> int:
 
     print(f"building run {_iso(run)}")
     fields = source.read_fields(source.download(run, STEPS, args.work))
-    print(f"{build(run, fields, args.out)} tiles in {args.out}")
+    count, dropped = build(run, fields, args.out)
+    print(f"{count} tiles in {args.out}")
+    if dropped:
+        # A wind-only site replaces the deployed hazards: only when these are gone or old anyway. Otherwise the deployed
+        # run stays, it is older than the latest, and the next hour retries.
+        if deployed is not None and datetime.now(timezone.utc) - deployed <= MAX_AGE:
+            print(f"::error::hazards dropped, deployed run {_iso(deployed)} stays")
+            _output(changed=False)
+            return 1
+        print(f"::error::hazards dropped, deploying the wind of run {_iso(run)} alone")
     _output(changed=True)
     return 0
 
