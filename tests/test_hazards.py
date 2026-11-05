@@ -1,7 +1,7 @@
 import numpy as np
 from windtiles.hazards import (
-    TI1_POINTS, ceiling_ft, convective_rate, deformation, freezing_fl, gust_kt, icing, max_pool, severity, thunderstorm,
-    turbulence, visibility_sm,
+    TI1_POINTS, ceiling_ft, convective_rate, deformation, freezing_fl, gust_kt, icing, max_pool, min_pool, severity,
+    thunderstorm, turbulence, visibility_sm,
 )
 
 lon, lat = np.meshgrid(np.arange(-180, 180, 0.25), np.arange(-90, 90.25, 0.25))
@@ -41,6 +41,12 @@ def test_ceiling_is_above_ground_and_capped():
 
 def test_visibility_is_capped_at_ten_miles():
     assert np.allclose(visibility_sm(np.array([1609.344, 24135.0, 0.0])), [1, 10, 0])
+
+def test_min_pool_keeps_a_low_node_around_it():
+    globe = np.full((721, 1440), 12_000.0)
+    globe[360, 720] = 300
+    pooled = min_pool(globe, 4)
+    assert pooled[362, 722] == 300 and pooled[363, 720] == 12_000
 
 def test_gust_in_knots():
     assert np.allclose(gust_kt(np.array([10.0])), [19.43844])

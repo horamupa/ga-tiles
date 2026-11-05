@@ -117,6 +117,22 @@ def test_surface_conditions_are_ceiling_above_ground_visibility_and_gust(tmp_pat
     assert not dropped and (tmp_path / "hazards/v1/2026101900/2026101906/sfc/3/2/3.png").exists()
 
 
+def test_a_fog_pocket_survives_the_coarse_tiles(tmp_path):
+    f = fields()
+    f[("ceiling", 0, 6)] = globe(19_999.0)
+    f[("ceiling", 0, 6)][361, 721] = 400.0  # between the 1° nodes of 0°, 0° and 0.25°N, 0.25°E
+    build(RUN, f, tmp_path, levels=["500"], hazard_levels=["sfc"], steps=[6])
+    ceiling, _, _ = decode_tile((tmp_path / "hazards/v1/2026101900/2026101906/sfc/1/0/1.png").read_bytes())
+    assert ceiling.min() < 12_000
+
+
+def test_a_broken_surface_field_costs_only_the_surface_tiles(tmp_path):
+    f = fields()
+    del f[("vis", 0, 6)]
+    count, dropped = build(RUN, f, tmp_path, levels=["500"], hazard_levels=["sfc", "500"], steps=[6])
+    assert not dropped and not (tmp_path / f"hazards/v1/{STEP}/sfc").exists() and (tmp_path / f"hazards/v1/{STEP}/500").exists()
+
+
 def test_thunderstorm_reads_cape_and_cprat():
     s, cape, rate = hazard_fields(fields(), "col", 6)
     assert np.allclose(s, 0.5, atol=0.01) and np.allclose(cape, 800) and np.allclose(rate, 1.55, atol=0.01)

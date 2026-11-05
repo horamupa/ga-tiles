@@ -78,6 +78,11 @@ def gust_kt(gust_ms: np.ndarray) -> np.ndarray:
     return (gust_ms * KT_PER_MS).astype(np.float32)
 
 
+def min_pool(globe: np.ndarray, stride: int) -> np.ndarray:
+    """`max_pool` of the lowest: a fog pocket between coarse nodes must not read as clear."""
+    return -max_pool(-globe, stride)
+
+
 def convective_rate(cprat: np.ndarray) -> np.ndarray:
     """Convective precipitation rate, mm/h, from kg/m²/s."""
     return np.maximum(cprat * 3600, 0).astype(np.float32)

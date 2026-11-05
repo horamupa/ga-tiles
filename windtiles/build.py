@@ -17,7 +17,6 @@ from windtiles.grid import LEVELS, ZOOMS, tile_grid, tile_nodes
 MANIFEST_URL = "https://aviation-weather-tiles.web.app/wind/v1/manifest.json"
 STEPS = list(range(3, 67, 3))
 MAX_AGE = timedelta(hours=18)
-KT_PER_MS = hazards.KT_PER_MS
 KELVIN = 273.15
 HAZARD_LEVELS = [*LEVELS, "col"]
 STORM_POOL = 4  # max over ±2 nodes = ±0.5°: the model misplaces cells by tens of miles (README «Сверка»)
@@ -45,11 +44,11 @@ def level_fields(fields, level: str, step: int) -> tuple[np.ndarray, np.ndarray,
     """u, v (kt) and T (°C) of one level; NaN below ground on pressure levels."""
     if level == "sfc":
         u, v, t = (fields[(name, 0, step)] for name in ("10u", "10v", "2t"))
-        return u * KT_PER_MS, v * KT_PER_MS, t - KELVIN
+        return u * hazards.KT_PER_MS, v * hazards.KT_PER_MS, t - KELVIN
     hpa = int(level)
     u, v, t = (fields[(name, hpa, step)] for name in ("u", "v", "t"))
     ground = fields[("sp", 0, step)] < hpa * 100
-    return tuple(np.where(ground, np.nan, x).astype(np.float32) for x in (u * KT_PER_MS, v * KT_PER_MS, t - KELVIN))
+    return tuple(np.where(ground, np.nan, x).astype(np.float32) for x in (u * hazards.KT_PER_MS, v * hazards.KT_PER_MS, t - KELVIN))
 
 
 def hazard_fields(fields, level: str, step: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -103,15 +102,23 @@ def build(
 
 
 def _write_hazards(run: datetime, fields, out: Path, hazard_levels, steps) -> int:
-    """Hazard tiles of every level and step; returns the tile count."""
+    """Hazard tiles of every level and step; returns the tile count. A broken surface field costs that frame's `sfc`
+    tiles alone: the conditions are one layer, not all the hazards."""
     count = 0
     for index, step in enumerate(steps):
         for level in hazard_levels:
+            directory = out / f"hazards/v1/{_frame(run, step)}/{level}"
+            if level == "sfc":
+                try:
+                    count += _write_tiles(directory, hazard_fields(fields, level, step), pooled=2, pool=hazards.min_pool)
+                except KeyError as error:
+                    print(f"skip sfc at step {step}: {error!r}")
+                continue
             channels = hazard_fields(fields, level, step)
-            if index == 0 and level != "sfc":
+            if index == 0:
                 _hazard_summary(level, channels[: 1 if level == "col" else 2])
-            pooled = 0 if level in ("col", "sfc") else 2  # col is already widened in hazard_fields; sfc has no S
-            count += _write_tiles(out / f"hazards/v1/{_frame(run, step)}/{level}", channels, pooled)
+            pooled = 0 if level == "col" else 2  # col is already widened in hazard_fields
+            count += _write_tiles(directory, channels, pooled)
     return count
 
 
@@ -119,11 +126,12 @@ def _frame(run: datetime, step: int) -> str:
     return f"{run:%Y%m%d%H}/{run + timedelta(hours=step):%Y%m%d%H}"
 
 
-def _write_tiles(directory: Path, channels, pooled: int) -> int:
-    """Every zoom's tiles of one level; the first `pooled` channels (S) take the maximum around each node."""
+def _write_tiles(directory: Path, channels, pooled: int, pool=hazards.max_pool) -> int:
+    """Every zoom's tiles of one level; the first `pooled` channels take the `pool` around each node: the maximum of S,
+    the minimum of ceiling and visibility."""
     count = 0
     for zoom, stride in ZOOMS.items():
-        globes = [hazards.max_pool(x, stride) if i < pooled and stride > 1 else x for i, x in enumerate(channels)]
+        globes = [pool(x, stride) if i < pooled and stride > 1 else x for i, x in enumerate(channels)]
         rows, columns = tile_grid(zoom)
         for row in range(rows):
             for column in range(columns):
