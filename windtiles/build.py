@@ -14,7 +14,7 @@ from windtiles import hazards, source
 from windtiles.encode import encode_tile
 from windtiles.grid import LEVELS, ZOOMS, tile_grid, tile_nodes
 
-MANIFEST_URL = "https://aviation-weather-tiles.web.app/wind/v1/manifest.json"
+MANIFEST_URL = "https://ga-tiles.aviationweather.pro/wind/v1/manifest.json"
 STEPS = list(range(3, 67, 3))
 MAX_AGE = timedelta(hours=18)
 KELVIN = 273.15

@@ -41,7 +41,7 @@ def test_hazard_levels_and_neighbours():
     assert NEIGHBORS == {500: (600, 400), 400: (500, 300), 300: (400, 250)}
 
 def test_manifest_lives_on_the_ga_project():
-    assert MANIFEST_URL == "https://aviation-weather-tiles.web.app/wind/v1/manifest.json"
+    assert MANIFEST_URL == "https://ga-tiles.aviationweather.pro/wind/v1/manifest.json"
 
 def test_conversion_to_kt_and_celsius():
     u, v, t = level_fields(fields(), "500", 6)
