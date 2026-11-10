@@ -7,7 +7,7 @@ name = "windtiles"
 version = "0.1.0"
 description = "NOAA GFS 0.25° wind and hazard tiles for Aviation Weather"
 requires-python = ">=3.14"
-dependencies = ["eccodes", "numpy", "pillow"]
+dependencies = ["eccodes", "numpy", "omfiles", "pillow", "pyproj"]
 
 [tool.setuptools]
 packages = ["windtiles"]

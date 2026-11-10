@@ -15,7 +15,8 @@ BUCKET = "https://noaa-gfs-bdp-pds.s3.amazonaws.com"
 WIND_MB = [int(level) for level in LEVELS if level != "sfc"]
 ICING_MB = [900, 850, 800, 750, 700, 600]
 TURBULENCE_MB = [600, 500, 400, 300, 250]
-FIELDS = {  # (name, level) of the .idx entries a build reads
+CLOUD_MB = [1000, 975, 950, 925, 900, *range(850, 99, -50)]  # the cloud-top profile
+FIELDS = {  # (name, level) of the .idx entries the wind and hazard tiles read; a step without one stops the run
     *((name, f"{mb} mb") for name in ("UGRD", "VGRD", "TMP") for mb in WIND_MB),
     *(("RH", f"{mb} mb") for mb in ICING_MB),
     *((name, f"{mb} mb") for name in ("HGT", "UGRD", "VGRD") for mb in TURBULENCE_MB),
@@ -31,12 +32,30 @@ FIELDS = {  # (name, level) of the .idx entries a build reads
     ("VIS", "surface"),
     ("GUST", "surface"),
 }
-NAMES = {("gh", "isothermZero"): "zero", ("cpr", "surface"): "cprat", ("gh", "cloudCeiling"): "ceiling"}  # (shortName, typeOfLevel) → read_fields name
+SKY_FIELDS = {  # the sky family; a step without one of them loses the sky tiles that read it
+    ("HGT", "cloud ceiling"),
+    ("HGT", "surface"),
+    ("VIS", "surface"),
+    ("CAPE", "180-0 mb above ground"),
+    ("PRES", "surface"),
+    ("TCDC", "entire atmosphere"),
+    ("LCDC", "low cloud layer"),
+    ("MCDC", "middle cloud layer"),
+    ("HCDC", "high cloud layer"),
+    ("HPBL", "surface"),
+    *((name, f"{mb} mb") for name in ("TCDC", "HGT") for mb in CLOUD_MB),
+}
+NAMES = {  # (shortName, typeOfLevel) → read_fields name
+    ("gh", "isothermZero"): "zero",
+    ("cpr", "surface"): "cprat",
+    ("gh", "cloudCeiling"): "ceiling",
+    ("unknown", "surface"): "hpbl",  # HPBL, NCEP local 0.3.196: eccodes has no name; the one such field we fetch
+}
 SFC_WIND = ["10u", "10v", "2t", "sp"]  # surface fields the wind tiles read
 PL_WIND = ["u", "v", "t"]  # pressure-level fields the wind tiles read on LEVELS
 WINDS = {"u", "v", "10u", "10v"}
 WIND_LIMIT = 150  # m/s; |wind| at or past it is a broken field
-RANGES = {  # K, K, Pa, m, %, m, J/kg, kg/m²/s, m, m, m, m/s
+RANGES = {  # K, K, Pa, m, %, m, J/kg, kg/m²/s, m, m, m, m/s, %, %, %, %, m
     "t": (150, 350),
     "2t": (150, 350),
     "sp": (30_000, 115_000),
@@ -49,6 +68,11 @@ RANGES = {  # K, K, Pa, m, %, m, J/kg, kg/m²/s, m, m, m, m/s
     "orog": (-1_000, 9_000),
     "vis": (0, 100_000),
     "gust": (0, 150),
+    "tcc": (-1, 101),
+    "lcc": (-1, 101),
+    "mcc": (-1, 101),
+    "hcc": (-1, 101),
+    "hpbl": (-1, 10_000),
 }
 
 
@@ -81,9 +105,9 @@ def parse_idx(text: str) -> list[IdxEntry]:
     return [IdxEntry(row[3], row[4], row[5], start, end) for row, start, end in zip(rows, starts, ends)]
 
 
-def wanted(entry: IdxEntry, step: int) -> bool:
-    """A field of the build at this step; `0-N hour ave fcst` averages do not pass."""
-    return (entry.name, entry.level) in FIELDS and entry.forecast == f"{step} hour fcst"
+def wanted(entry: IdxEntry, step: int, fields=FIELDS | SKY_FIELDS) -> bool:
+    """One of `fields` at this step; `0-N hour ave fcst` averages do not pass."""
+    return (entry.name, entry.level) in fields and entry.forecast == f"{step} hour fcst"
 
 
 def byte_ranges(entries: list[IdxEntry]) -> list[tuple[int, int | None]]:
@@ -113,17 +137,24 @@ def _fetch(url: str, range_header: str | None) -> bytes:
 
 
 def download(
-    run: datetime, steps: list[int], directory: Path, fetch: Callable[[str, str | None], bytes] = _fetch
+    run: datetime,
+    steps: list[int],
+    directory: Path,
+    fetch: Callable[[str, str | None], bytes] = _fetch,
+    fields=FIELDS | SKY_FIELDS,
 ) -> list[Path]:
-    """Wanted fields of each step into f{step:03}.grib2. A failure or an incomplete .idx stops the run;
-    the next hour tries again."""
+    """`fields` of each step into f{step:03}.grib2. A failure or a step without one of `FIELDS` stops the run;
+    the next hour tries again. A step without a sky field goes on without it."""
     directory.mkdir(parents=True, exist_ok=True)
     paths = []
     for step in steps:
         url = file_url(run, step)
-        entries = [entry for entry in parse_idx(fetch(url + ".idx", None).decode()) if wanted(entry, step)]
-        if missing := FIELDS - {(entry.name, entry.level) for entry in entries}:
-            raise ValueError(f"step {step}: no {sorted(missing)} in the .idx")
+        entries = [entry for entry in parse_idx(fetch(url + ".idx", None).decode()) if wanted(entry, step, fields)]
+        missing = fields - {(entry.name, entry.level) for entry in entries}
+        if missing & FIELDS:
+            raise ValueError(f"step {step}: no {sorted(missing & FIELDS)} in the .idx")
+        if missing:
+            print(f"step {step}: no {sorted(missing)} in the .idx")
         path = directory / f"f{step:03}.grib2"
         with open(path, "wb") as file:
             for start, end in byte_ranges(entries):
