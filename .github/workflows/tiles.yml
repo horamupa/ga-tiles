@@ -26,16 +26,6 @@ jobs:
           python-version: "3.14"
           cache: pip
       - run: pip install -r requirements.txt -e .
-      - name: Diagnose the exit crash
-        continue-on-error: true
-        run: |
-          sudo apt-get install -y -q gdb > /dev/null
-          for f in tests/test_*.py; do rc=0; python -X faulthandler -I -m pytest -q "$f" > /dev/null 2>&1 || rc=$?; echo "$f: $rc"; done
-          for m in "eccodes" "omfiles" "pyproj" "eccodes, omfiles" "eccodes, pyproj" "omfiles, pyproj" "eccodes, omfiles, pyproj"; do
-            rc=0; python -I -c "import $m" || rc=$?; echo "import $m: $rc"
-          done
-          rc=0; python -X faulthandler -I -m pytest -q 2>&1 | tail -40 || rc=$?
-          gdb -batch -ex run -ex bt --args python -I -m pytest -q 2>&1 | grep -v "Thread 0x\|^\[New Thread\|^\[Thread" | tail -80 || true
       - run: python -I -m pytest -q
       # Before the build: a broken upload fails in seconds. The deployed run is read from the bucket itself.
       - name: Check R2

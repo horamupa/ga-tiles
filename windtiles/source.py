@@ -1,4 +1,8 @@
-"""NOAA GFS 0.25°: latest run, download by byte ranges, GRIB2 → normalized globes."""
+"""NOAA GFS 0.25°: latest run, download by byte ranges, GRIB2 → normalized globes.
+
+eccodes is imported where a GRIB is read, not here: its wheel and pyproj's each carry a PROJ, and on Linux a process that
+loads eccodes before pyproj crashes at exit. The bucket models' build takes helpers from `build` and must not load it.
+"""
 
 import urllib.request
 from collections.abc import Callable
@@ -6,7 +10,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import NamedTuple
 
-import eccodes
 import numpy as np
 
 from windtiles.grid import LEVELS, NI, NJ, STEP_DEG, normalize
@@ -165,6 +168,8 @@ def download(
 
 def read_fields(paths: list[Path]) -> dict[tuple[str, int, int], np.ndarray]:
     """(name, level, step) → normalized (721, 1440) globe; level 0 for surface fields."""
+    import eccodes
+
     fields = {}
     for path in paths:
         with open(path, "rb") as file:
@@ -189,6 +194,8 @@ def _wind_needs(name: str, level: int) -> bool:
 
 
 def _key(handle) -> tuple[str, int, int]:
+    import eccodes
+
     get = lambda name: eccodes.codes_get(handle, name)
     short_name, kind = get("shortName"), get("typeOfLevel")
     level = get("level") if kind == "isobaricInhPa" else 0
@@ -196,6 +203,8 @@ def _key(handle) -> tuple[str, int, int]:
 
 
 def _read_message(handle, key: tuple[str, int, int]) -> np.ndarray:
+    import eccodes
+
     get = lambda name: eccodes.codes_get(handle, name)
     first_lat = get("latitudeOfFirstGridPointInDegrees")
     if (
