@@ -1,0 +1,23 @@
+name: Fresh tiles
+on:
+  # GitHub starts only a few of these a day (B-118), enough for a watch that does not depend on trigger/worker.js.
+  schedule:
+    - cron: "50 * * * *"
+  workflow_dispatch:
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      # A failed run is GitHub's mail to the owner. With the hourly trigger the site's GFS run is at most about 11.5 hours
+      # old: data ready 4 hours after the run time, a new run every 6 hours, the build within the hour, 20 minutes long.
+      - name: Check the run on the site
+        run: |
+          run=$(curl -fsS https://ga-tiles.aviationweather.pro/wind/v1/manifest.json | jq -r .run)
+          hours=$(( ($(date +%s) - $(date -d "$run" +%s)) / 3600 ))
+          echo "The site serves run $run, $hours h old"
+          if [ "$hours" -ge 14 ]; then
+            echo "::error::GA tiles are $hours h old: check the Tiles runs and the ga-tiles-trigger Worker"
+            exit 1
+          fi
