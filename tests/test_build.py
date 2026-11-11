@@ -55,7 +55,13 @@ def test_hazard_levels_and_neighbours():
     assert NEIGHBORS == {500: (600, 400), 400: (500, 300), 300: (400, 250)}
 
 def test_manifest_lives_on_the_ga_project():
-    assert MANIFEST_URL == "https://aviation-weather-tiles.web.app/wind/v1/manifest.json"
+    assert MANIFEST_URL == "https://ga-tiles.aviationweather.pro/wind/v1/manifest.json"
+
+def test_deployed_run_from_a_file_pulled_from_the_bucket(tmp_path):
+    path = tmp_path / "manifest.json"
+    assert build_module.deployed_run(path.as_uri()) is None  # nothing deployed yet
+    path.write_text('{"run": "2026-10-19T00:00:00Z", "frames": []}')
+    assert build_module.deployed_run(path.as_uri()) == RUN
 
 def test_conversion_to_kt_and_celsius():
     u, v, t = level_fields(fields(), "500", 6)
@@ -186,7 +192,7 @@ def stub_source(monkeypatch, run, deployed=None, dropped=False):
     """main() on stubs; returns the calls to `download` and `build`."""
     calls = []
     monkeypatch.setattr(source, "latest_run", lambda now, exists: run)
-    monkeypatch.setattr(build_module, "deployed_run", lambda: deployed)
+    monkeypatch.setattr(build_module, "deployed_run", lambda url: deployed)
     monkeypatch.setattr(source, "download", lambda *args: calls.append(("download", args)) or ["f.grib2"])
     monkeypatch.setattr(source, "read_fields", lambda paths: {"paths": paths})
     monkeypatch.setattr(build_module, "build", lambda *args: calls.append(("build", args)) or (0, dropped))
@@ -313,7 +319,7 @@ def test_wind_and_hazard_tiles_are_unchanged_by_the_sky_family(tmp_path):
 def test_main_builds_the_sky_alone(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(source, "latest_run", lambda now, exists: RUN)
-    monkeypatch.setattr(build_module, "deployed_run", lambda: None)
+    monkeypatch.setattr(build_module, "deployed_run", lambda url: None)
     monkeypatch.setattr(source, "download", lambda *args, fields: calls.append(("download", *args, fields)) or ["f"])
     monkeypatch.setattr(source, "read_fields", lambda paths: {"paths": paths})
     monkeypatch.setattr(build_module, "build_sky", lambda *args: calls.append(("build_sky", *args)) or 0)

@@ -14,7 +14,7 @@ from windtiles import hazards, models, source, tiles
 from windtiles.encode import encode_tile
 from windtiles.grid import LEVELS, ZOOMS, tile_grid, tile_nodes
 
-MANIFEST_URL = "https://aviation-weather-tiles.web.app/wind/v1/manifest.json"
+MANIFEST_URL = "https://ga-tiles.aviationweather.pro/wind/v1/manifest.json"
 STEPS = list(models.GFS.steps)
 MAX_AGE = timedelta(hours=18)
 KELVIN = 273.15
@@ -235,6 +235,7 @@ def main(argv=None) -> int:
     parser.add_argument("--out", type=Path, required=True, help="site directory")
     parser.add_argument("--work", type=Path, required=True, help="GRIB download directory, outside the repository")
     parser.add_argument("--force", action="store_true", help="build without comparing with the deployed run")
+    parser.add_argument("--deployed", default=MANIFEST_URL, help="URL of the deployed manifest, file:// in CI")
     parser.add_argument("--sky-only", action="store_true", help="the sky family alone, for a local check")
     args = parser.parse_args(argv)
 
@@ -243,7 +244,7 @@ def main(argv=None) -> int:
         print("no GFS run with step 66 in the last 24 hours")
         _output(changed=False)
         return 1
-    deployed = deployed_run()
+    deployed = deployed_run(args.deployed)
     if not args.force:
         decision = decide(run, deployed, datetime.now(timezone.utc))
         if decision != "build":

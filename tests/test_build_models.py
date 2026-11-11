@@ -1,5 +1,7 @@
 import json
+import re
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -18,13 +20,16 @@ def run(hours) -> Run:
     return Run(RUN, [RUN + timedelta(hours=h) for h in hours], [], RUN)
 
 
-def test_registry_has_ten_models_with_their_layers():
+def test_registry_has_twelve_models_in_order_of_preference_with_their_layers():
     assert [m.id for m in models.MODELS] == [
-        "gfs", "ecmwf", "icon", "iconEu", "iconD2", "aladin", "arome", "aromeHd", "ukv", "hrrr", "hrdps", "msm",
+        "hrrr", "hrdps", "msm", "ukv", "aromeHd", "arome", "iconD2", "aladin", "iconEu", "ecmwf", "icon", "gfs",
     ]
     for model in models.MODELS:
         south, west, north, east = model.bbox
         assert -90 <= south < north <= 90 and -180 <= west < east <= 180 and 1 <= model.zoom <= 7
+        if model.home:  # inside the bbox, but east may pass 180
+            home_south, home_west, home_north, home_east = model.home
+            assert south <= home_south < home_north <= north and west <= home_west < home_east <= east + 360
         assert set(model.layers) <= set(models.CLOUD_LAYERS)
         assert ("visibility" in model.layers) == ("fog" in model.layers)  # fog is drawn from visibility
         assert model.source == "gfs" or "cloudTops" not in model.layers  # no bucket model has cloud tops
@@ -40,16 +45,19 @@ def test_registry_has_ten_models_with_their_layers():
 
 def test_models_json_lists_the_models_the_site_holds(tmp_path):
     assert json.loads(models.models_json(tmp_path)) == []
-    for model_id in ("hrrr", "gfs", "iconD2"):
+    for model_id in ("gfs", "iconD2", "ecmwf", "hrrr", "ukv"):
         (tmp_path / f"sky/v1/{model_id}").mkdir(parents=True)
         (tmp_path / f"sky/v1/{model_id}/manifest.json").write_text("{}")
-    (tmp_path / "sky/v1/ukv/2026111012").mkdir(parents=True)  # tiles without a manifest: not listed
+    (tmp_path / "sky/v1/arome/2026111012").mkdir(parents=True)  # tiles without a manifest: not listed
     listed = json.loads(models.models_json(tmp_path))
-    assert [m["id"] for m in listed] == ["gfs", "iconD2", "hrrr"]  # registry order
-    assert listed[1] == {
+    assert [m["id"] for m in listed] == ["hrrr", "ukv", "iconD2", "ecmwf", "gfs"]  # registry order
+    assert listed[2] == {  # no home: the whole bbox
         "id": "iconD2", "title": "ICON-D2", "km": 2.2, "bbox": [43.18, -3.94, 58.08, 20.34], "zoom": 7,
         "layers": ["clouds", "lowClouds", "mediumClouds", "highClouds", "visibility", "fog", "cape"],
     }
+    assert [m.get("home") for m in listed] == [None, [49, -11, 61, 2.5], None, [-90, -30, 90, 190], None]
+    assert BY_ID["arome"].home == BY_ID["aromeHd"].home == (37.5, -12, 51.5, 8.5)
+    assert BY_ID["icon"].home == (-90, -30, 90, 190)
 
 
 def test_frames_of_global_and_regional_models():
@@ -200,7 +208,7 @@ def test_main_writes_models_json_of_the_site_after_a_failed_model(tmp_path, monk
     (tmp_path / "sky/v1/gfs").mkdir(parents=True)
     (tmp_path / "sky/v1/gfs/manifest.json").write_text("{}")
 
-    def build(model, out, workers):
+    def build(model, out, workers, deployed):
         if model.id == "hrrr":
             raise RuntimeError("bucket down")
         (out / f"sky/v1/{model.id}").mkdir(parents=True)
@@ -209,6 +217,33 @@ def test_main_writes_models_json_of_the_site_after_a_failed_model(tmp_path, monk
 
     monkeypatch.setattr(build_models, "build_model", build)
     assert main(["--out", str(tmp_path), "--models", "hrrr", "iconEu"]) == 1
-    assert [m["id"] for m in json.loads((tmp_path / "sky/v1/models.json").read_text())] == ["gfs", "iconEu"]
+    assert [m["id"] for m in json.loads((tmp_path / "sky/v1/models.json").read_text())] == ["iconEu", "gfs"]
     out = capsys.readouterr().out
     assert "::error::hrrr: RuntimeError('bucket down')" in out and "iconEu: run 2026-11-10T12:00:00Z, 48 frames" in out
+
+
+def test_a_deployed_run_is_skipped(tmp_path, monkeypatch, capsys):
+    read, calls = fake_read()
+    assert build_model(BY_ID["ukv"], tmp_path, latest_run=lambda source, h: run([1]), read=read, deployed=RUN) is None
+    assert calls == [] and not (tmp_path / "sky").exists()
+    assert "ukv: run 2026-11-10T12:00:00Z up to date" in capsys.readouterr().out
+
+    deployed = tmp_path / "deployed"  # the manifests pulled from the bucket
+    (deployed / "sky/v1/ukv").mkdir(parents=True)
+    (deployed / "sky/v1/ukv/manifest.json").write_text('{"run": "2026-11-10T12:00:00Z", "frames": []}')
+    got = {}
+
+    def build(model, out, workers, deployed):
+        got[model.id] = deployed
+
+    monkeypatch.setattr(build_models, "build_model", build)
+    output = tmp_path / "github_output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    assert main(["--out", str(tmp_path / "site"), "--models", "ukv", "hrrr", "--deployed", deployed.as_uri()]) == 0
+    assert got == {"hrrr": None, "ukv": RUN} and output.read_text() == "changed=false\n"
+
+
+def test_the_models_workflow_builds_every_bucket_model():
+    workflow = (Path(__file__).parents[1] / ".github/workflows/models.yml").read_text()
+    matrix = re.search(r"^\s+model: \[(.*)\]$", workflow, re.MULTILINE).group(1)
+    assert matrix.split(", ") == [model.id for model in models.MODELS if model.source != "gfs"]

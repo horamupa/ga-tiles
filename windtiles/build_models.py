@@ -1,7 +1,7 @@
 """Build the sky family of the Open-Meteo bucket models: the latest run of each at its `Model.runs` hours into
 sky/v1/{model}, then sky/v1/models.json of every model the site holds.
 
-    .venv/bin/python -I -m windtiles.build_models --out site [--models iconEu hrrr] [--workers 8]
+    .venv/bin/python -I -m windtiles.build_models --out site [--models iconEu hrrr] [--workers 8] [--deployed URL]
 """
 
 import argparse
@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 
 from windtiles import models, om_source, tiles
-from windtiles.build import SKY_POOLS, _frame, _iso, _write_manifest, write_json
+from windtiles.build import SKY_POOLS, _frame, _iso, _output, _write_manifest, deployed_run, write_json
 from windtiles.hazards import CEILING_CAP_FT, M_PER_FT, visibility_sm
 
 VARIABLES = {  # layer → bucket variable and its unit; fog reads visibility, no bucket model has cloud tops
@@ -86,13 +86,17 @@ def build_frame(model: models.Model, run: datetime, step: int, out: Path, read=o
 
 
 def build_model(
-    model: models.Model, out: Path, workers: int = 8, latest_run=om_source.latest_run, read=om_source.read
-) -> tuple[datetime, int, int, int]:
+    model: models.Model, out: Path, workers: int = 8, latest_run=om_source.latest_run, read=om_source.read,
+    deployed: datetime | None = None,
+) -> tuple[datetime, int, int, int] | None:
     """The latest run's frames, `workers` at a time, one frame per worker in memory, then the manifest of the frames
-    written; returns the run and the frame, tile and downloaded byte counts. A failed frame is left out of the manifest
-    and its tiles, if any, stay unreferenced: deleting them could break a manifest of the same run already on the site.
-    With no frame written the manifest stays as it was."""
+    written; returns the run and the frame, tile and downloaded byte counts, None when the run is the `deployed` one.
+    A failed frame is left out of the manifest and its tiles, if any, stay unreferenced: deleting them could break a
+    manifest of the same run already on the site. With no frame written the manifest stays as it was."""
     run = latest_run(model.source, model.runs)
+    if run.time == deployed:
+        print(f"{model.id}: run {_iso(run.time)} up to date", flush=True)
+        return None
 
     def frame(step: int) -> tuple[int, int] | None:
         try:
@@ -118,23 +122,32 @@ def main(argv=None) -> int:
     parser.add_argument("--out", type=Path, required=True, help="site directory")
     parser.add_argument("--models", nargs="+", choices=bucket, default=bucket, help="default: every bucket model")
     parser.add_argument("--workers", type=int, default=8, help="frames read and cut at once")
+    parser.add_argument(
+        "--deployed", help="URL of the deployed site, file:// in CI: a model whose latest run is there is skipped"
+    )
     args = parser.parse_args(argv)
 
-    failed = False
+    failed = changed = False
     for model in (model for model in models.MODELS if model.id in args.models):
         start = time.monotonic()
+        deployed = deployed_run(f"{args.deployed}/sky/v1/{model.id}/manifest.json") if args.deployed else None
         try:
-            run, frames, count, downloaded = build_model(model, args.out, args.workers)
+            result = build_model(model, args.out, args.workers, deployed=deployed)
         except Exception as error:
             print(f"::error::{model.id}: {error!r}", flush=True)
             failed = True
             continue
+        if result is None:
+            continue
+        changed = True
+        run, frames, count, downloaded = result
         print(
             f"{model.id}: run {_iso(run)}, {frames} frames, {count} tiles, {downloaded / 1e6:.0f} MB downloaded,"
             f" {time.monotonic() - start:.0f} s",
             flush=True,
         )
     write_json(args.out / "sky/v1/models.json", models.models_json(args.out))
+    _output(changed)
     return 1 if failed else 0
 
 
