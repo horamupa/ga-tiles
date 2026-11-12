@@ -1,5 +1,7 @@
 name: GA tiles
 on:
+  push:
+    branches: [sky-tiles]
   schedule:
     - cron: "25 * * * *"
   workflow_dispatch:
@@ -9,15 +11,14 @@ on:
         type: boolean
         default: false
 concurrency:
-  group: tiles
+  group: tiles-${{ github.ref }}
   cancel-in-progress: false
 jobs:
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 60
     permissions:
       contents: read
-      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -26,17 +27,24 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt -e .
       - run: python -I -m pytest -q
+      # Before the build: a broken upload fails in seconds. The deployed run is read from the bucket itself.
+      - name: Check R2
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          tools/r2.sh setup gfs
+          tools/r2.sh pull "$RUNNER_TEMP/deployed" wind/v1/manifest.json
       - id: build
-        run: python -I -m windtiles.build --out site --work "$RUNNER_TEMP/grib" ${{ inputs.force && '--force' || '' }}
-      - if: steps.build.outputs.changed == 'true'
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: projects/380791025462/locations/global/workloadIdentityPools/github/providers/ga-tiles
-          service_account: tiles-deploy@aviation-weather-tiles.iam.gserviceaccount.com
-      # One release swaps the whole site: the tiles and the manifest of a run go live together.
-      - name: Deploy the run
+        run: >-
+          python -I -m windtiles.build --out site --work "$RUNNER_TEMP/grib"
+          --deployed "file://$RUNNER_TEMP/deployed/wind/v1/manifest.json" ${{ inputs.force && '--force' || '' }}
+      - name: Upload the run
         if: steps.build.outputs.changed == 'true'
-        run: npx --yes firebase-tools@14 deploy --only hosting --non-interactive --message "run $(jq -r .run site/wind/v1/manifest.json)"
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: tools/r2.sh upload site
   # GitHub turns off schedules of a public repository after 60 days without activity.
   keepalive:
     if: github.event_name == 'schedule'

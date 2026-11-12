@@ -1,0 +1,52 @@
+name: Sky models
+on:
+  push:
+    branches: [sky-tiles]
+  schedule:
+    - cron: "40 * * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Build the latest runs even if they are already deployed
+        type: boolean
+        default: false
+concurrency:
+  group: models-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:  # the bucket models of windtiles/models.py, checked by test_the_models_workflow_builds_every_bucket_model
+        model: [hrrr, hrdps, msm, ukv, aromeHd, arome, iconD2, aladin, iconEu, ecmwf, icon]
+    env:
+      MODEL: ${{ matrix.model }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+      - run: pip install -r requirements.txt -e .
+      # Before the build: a broken upload fails in seconds. The deployed run is read from the bucket itself.
+      - name: Check R2
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          tools/r2.sh setup "$MODEL"
+          tools/r2.sh pull "$RUNNER_TEMP/deployed" "sky/v1/$MODEL/manifest.json"
+      - id: build
+        run: >-
+          python -I -m windtiles.build_models --out site --models "$MODEL"
+          ${{ !inputs.force && '--deployed "file://$RUNNER_TEMP/deployed"' || '' }}
+      - name: Upload the run
+        if: steps.build.outputs.changed == 'true'
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: tools/r2.sh upload site

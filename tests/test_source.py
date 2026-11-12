@@ -15,6 +15,7 @@ CAPE = {  # NCEP table: the keys of the real GFS message, `shortName` alone does
     "typeOfSecondFixedSurface": 108, "scaleFactorOfSecondFixedSurface": 0, "scaledValueOfSecondFixedSurface": 0,
 }
 CPRAT = {"shortName": "cpr", "typeOfLevel": "surface"}
+HPBL = {"centre": "kwbc", "discipline": 0, "parameterCategory": 3, "parameterNumber": 196, "typeOfFirstFixedSurface": 1}
 
 def grib(path, ni=1440, nj=721, step_deg=0.25, first_lat=90.0, keys=None, values=None):
     handle = eccodes.codes_grib_new_from_samples("regular_ll_pl_grib2")
@@ -107,7 +108,8 @@ def test_wanted_takes_the_instant_rate(name, level, forecast, expected):
 
 @pytest.mark.parametrize("name, level, expected", [
     ("UGRD", "250 mb", True), ("TMP", "250 mb", False), ("RH", "600 mb", True), ("RH", "500 mb", False),
-    ("HGT", "250 mb", True), ("HGT", "700 mb", False), ("HGT", "0C isotherm", True),
+    ("HGT", "250 mb", True), ("HGT", "700 mb", True), ("HGT", "50 mb", False), ("HGT", "0C isotherm", True),
+    ("TCDC", "100 mb", True), ("TCDC", "50 mb", False), ("TCDC", "entire atmosphere", True), ("HPBL", "surface", True),
     ("CAPE", "180-0 mb above ground", True), ("CAPE", "surface", False), ("PRES", "surface", True),
 ])
 def test_wanted_follows_the_field_table(name, level, expected):
@@ -159,6 +161,11 @@ def test_download_refuses_a_step_without_a_wanted_field(tmp_path):
     with pytest.raises(ValueError, match=r"step 9: .*CPRAT"):
         source.download(RUN, [9], tmp_path / "work", fetch)
 
+def test_download_goes_on_without_a_sky_field(tmp_path, capsys):
+    idx = idx_of(sorted((name, level, "6 hour fcst") for name, level in source.FIELDS))
+    source.download(RUN, [6], tmp_path / "work", lambda url, range_header: idx.encode())
+    assert "step 6: no [('HCDC', 'high cloud layer')" in capsys.readouterr().out
+
 def test_reads_and_normalizes_a_global_field(tmp_path):
     fields = read_fields([grib(tmp_path / "pl.grib2")])
     globe = fields[("u", 250, 6)]
@@ -175,6 +182,7 @@ def test_reads_and_normalizes_a_global_field(tmp_path):
     (ZERO, 3_000.0, ("zero", 0, 6)),
     (CAPE, 500.0, ("cape", 0, 6)),
     (CPRAT, 0.001, ("cprat", 0, 6)),
+    (HPBL, 800.0, ("hpbl", 0, 6)),
 ])
 def test_names_the_fields(tmp_path, keys, valid, key):
     path = grib(tmp_path / "field.grib2", keys=keys, values=np.full(1440 * 721, valid))
