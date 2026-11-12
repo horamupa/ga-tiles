@@ -1,7 +1,5 @@
 name: GA tiles
 on:
-  push:
-    branches: [sky-tiles]
   schedule:
     - cron: "25 * * * *"
   workflow_dispatch:

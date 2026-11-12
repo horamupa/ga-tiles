@@ -1,7 +1,5 @@
 name: Sky models
 on:
-  push:
-    branches: [sky-tiles]
   schedule:
     - cron: "40 * * * *"
   workflow_dispatch:

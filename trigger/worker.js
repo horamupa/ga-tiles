@@ -5,7 +5,7 @@
 // Deploy from this folder (wrangler asks to log in to Cloudflare the first time):
 //   npx --yes wrangler@4 deploy
 //   npx --yes wrangler@4 secret put GITHUB_TOKEN   # fine-grained token: repository ga-tiles, Actions read and write
-const WORKFLOWS = ["tiles.yml"];
+const WORKFLOWS = ["tiles.yml", "models.yml"];
 
 export default {
   async scheduled(controller, env) {
