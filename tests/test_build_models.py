@@ -22,7 +22,7 @@ def run(hours) -> Run:
 
 def test_registry_has_twelve_models_in_order_of_preference_with_their_layers():
     assert [m.id for m in models.MODELS] == [
-        "hrrr", "hrdps", "msm", "ukv", "aromeHd", "arome", "iconD2", "aladin", "iconEu", "ecmwf", "icon", "gfs",
+        "rrfs", "hrdps", "msm", "ukv", "aromeHd", "arome", "iconD2", "aladin", "iconEu", "ecmwf", "icon", "gfs",
     ]
     for model in models.MODELS:
         south, west, north, east = model.bbox
@@ -34,7 +34,7 @@ def test_registry_has_twelve_models_in_order_of_preference_with_their_layers():
         assert ("visibility" in model.layers) == ("fog" in model.layers)  # fog is drawn from visibility
         assert model.source == "gfs" or "cloudTops" not in model.layers  # no bucket model has cloud tops
     assert "cloudBase" in BY_ID["ukv"].layers and "thermals" not in BY_ID["ukv"].layers
-    assert "clouds" not in BY_ID["aromeHd"].layers and "thermals" in BY_ID["hrrr"].layers
+    assert "clouds" not in BY_ID["aromeHd"].layers and "thermals" in BY_ID["rrfs"].layers
     assert variables(BY_ID["ecmwf"]) == {
         "cloud_cover": "%", "cloud_cover_low": "%", "cloud_cover_mid": "%", "cloud_cover_high": "%",
         "visibility": "m", "cape": "J/kg", "boundary_layer_height": "m",
@@ -45,12 +45,12 @@ def test_registry_has_twelve_models_in_order_of_preference_with_their_layers():
 
 def test_models_json_lists_the_models_the_site_holds(tmp_path):
     assert json.loads(models.models_json(tmp_path)) == []
-    for model_id in ("gfs", "iconD2", "ecmwf", "hrrr", "ukv"):
+    for model_id in ("gfs", "iconD2", "ecmwf", "rrfs", "ukv"):
         (tmp_path / f"sky/v1/{model_id}").mkdir(parents=True)
         (tmp_path / f"sky/v1/{model_id}/manifest.json").write_text("{}")
     (tmp_path / "sky/v1/arome/2026111012").mkdir(parents=True)  # tiles without a manifest: not listed
     listed = json.loads(models.models_json(tmp_path))
-    assert [m["id"] for m in listed] == ["hrrr", "ukv", "iconD2", "ecmwf", "gfs"]  # registry order
+    assert [m["id"] for m in listed] == ["rrfs", "ukv", "iconD2", "ecmwf", "gfs"]  # registry order
     assert listed[2] == {  # no home: the whole bbox
         "id": "iconD2", "title": "ICON-D2", "km": 2.2, "bbox": [43.18, -3.94, 58.08, 20.34], "zoom": 7,
         "layers": ["clouds", "lowClouds", "mediumClouds", "highClouds", "visibility", "fog", "cape"],
@@ -65,7 +65,7 @@ def test_frames_of_global_and_regional_models():
     assert steps(BY_ID["ecmwf"], run([*range(0, 90), *range(90, 145, 3)])) == list(range(3, 67, 3))
     assert steps(BY_ID["iconD2"], run(range(49))) == list(range(1, 49))
     assert steps(BY_ID["ukv"], run(range(55))) == list(range(1, 49))
-    assert steps(BY_ID["hrrr"], run(range(19))) == list(range(1, 19))  # a run that ends early stops there
+    assert steps(BY_ID["rrfs"], run(range(19))) == list(range(1, 19))  # a run that ends early stops there
     assert steps(BY_ID["msm"], run(range(79))) == list(range(1, 49))
 
 
@@ -83,14 +83,14 @@ def channels(model_id, **values):
 
 
 def test_units_of_every_channel():
-    c = channels("hrrr", cloud_cover=70, cloud_cover_low=20, cloud_cover_mid=40, cloud_cover_high=60, cape=800,
+    c = channels("rrfs", cloud_cover=70, cloud_cover_low=20, cloud_cover_mid=40, cloud_cover_high=60, cape=800,
                  visibility=4 * 1609.344, boundary_layer_height=304.8)
     ceiling, visibility, cape = c["base"]
     assert np.isnan(ceiling).all() and np.allclose(visibility, 4) and np.allclose(cape, 800)
     assert [float(x[0, 0]) for x in c["cloud"]] == [20, 40, 60]
     total, thermals, top = c["sky"]
     assert np.allclose(total, 70) and np.allclose(thermals, 1000) and np.isnan(top).all()
-    assert np.allclose(channels("hrrr", visibility=50_000)["base"][1], 10)
+    assert np.allclose(channels("rrfs", visibility=50_000)["base"][1], 10)
 
 
 def test_ukv_cloud_base_in_feet_and_none_is_the_cap():
@@ -209,17 +209,17 @@ def test_main_writes_models_json_of_the_site_after_a_failed_model(tmp_path, monk
     (tmp_path / "sky/v1/gfs/manifest.json").write_text("{}")
 
     def build(model, out, workers, deployed):
-        if model.id == "hrrr":
+        if model.id == "rrfs":
             raise RuntimeError("bucket down")
         (out / f"sky/v1/{model.id}").mkdir(parents=True)
         (out / f"sky/v1/{model.id}/manifest.json").write_text("{}")
         return RUN, 48, 100, 5_000_000
 
     monkeypatch.setattr(build_models, "build_model", build)
-    assert main(["--out", str(tmp_path), "--models", "hrrr", "iconEu"]) == 1
+    assert main(["--out", str(tmp_path), "--models", "rrfs", "iconEu"]) == 1
     assert [m["id"] for m in json.loads((tmp_path / "sky/v1/models.json").read_text())] == ["iconEu", "gfs"]
     out = capsys.readouterr().out
-    assert "::error::hrrr: RuntimeError('bucket down')" in out and "iconEu: run 2026-11-10T12:00:00Z, 48 frames" in out
+    assert "::error::rrfs: RuntimeError('bucket down')" in out and "iconEu: run 2026-11-10T12:00:00Z, 48 frames" in out
 
 
 def test_a_deployed_run_is_skipped(tmp_path, monkeypatch, capsys):
@@ -239,8 +239,8 @@ def test_a_deployed_run_is_skipped(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(build_models, "build_model", build)
     output = tmp_path / "github_output"
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
-    assert main(["--out", str(tmp_path / "site"), "--models", "ukv", "hrrr", "--deployed", deployed.as_uri()]) == 0
-    assert got == {"hrrr": None, "ukv": RUN} and output.read_text() == "changed=false\n"
+    assert main(["--out", str(tmp_path / "site"), "--models", "ukv", "rrfs", "--deployed", deployed.as_uri()]) == 0
+    assert got == {"rrfs": None, "ukv": RUN} and output.read_text() == "changed=false\n"
 
 
 def test_the_models_workflow_builds_every_bucket_model():

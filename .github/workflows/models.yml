@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:  # the bucket models of windtiles/models.py, checked by test_the_models_workflow_builds_every_bucket_model
-        model: [hrrr, hrdps, msm, ukv, aromeHd, arome, iconD2, aladin, iconEu, ecmwf, icon]
+        model: [rrfs, hrdps, msm, ukv, aromeHd, arome, iconD2, aladin, iconEu, ecmwf, icon]
     env:
       MODEL: ${{ matrix.model }}
     steps:

@@ -37,12 +37,12 @@ GFS = Model("gfs", "GFS", 25, GLOBE, 3, CLOUD_LAYERS, GLOBAL_STEPS, "gfs")
 FRANCE = (37.5, -12, 51.5, 8.5)
 OLD_WORLD = (-90, -30, 90, 190)  # Europe, Africa, Asia and Oceania: from the mid-Atlantic to 170°W
 # In order of preference: the app offers the first model that has the layer, covers the view and whose home holds the
-# view's centre. bbox of a projected or rotated grid (ALADIN, UKV, HRRR, HRDPS) is the latitude/longitude extent of its
+# view's centre. bbox of a projected or rotated grid (ALADIN, UKV, RRFS, HRDPS) is the latitude/longitude extent of its
 # edges, not the two corner points of the bucket's WKT; all rounded outwards to 0.01° (measured 10.11.2026).
 MODELS = [
     Model(
-        "hrrr", "HRRR", 3, (21.13, -134.1, 52.62, -60.91), 6, _without("cloudBase", "cloudTops"), REGIONAL_STEPS,
-        "ncep_hrrr_conus",
+        "rrfs", "RRFS", 3, (21.13, -134.1, 52.62, -60.91), 6, _without("cloudBase", "cloudTops"), REGIONAL_STEPS,
+        "ncep_rrfs_conus",
     ),
     Model(
         "hrdps", "HRDPS", 2.5, (27.28, -152.74, 70.62, -40.7), 6, ("clouds", "cape"), REGIONAL_STEPS, "cmc_gem_hrdps",
