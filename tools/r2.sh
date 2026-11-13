@@ -5,7 +5,8 @@
 #   tools/r2.sh setup NAME      install rclone, write and read back _probe/NAME: a broken upload fails in seconds,
 #                               with the requests and R2's answer in the log
 #   tools/r2.sh pull DIR KEY…   the objects that exist, at their keys under DIR; a missing one is no error
-#   tools/r2.sh upload SITE     the tiles, then the manifests, then sky/v1/models.json of the manifests in the bucket
+#   tools/r2.sh upload SITE     the tiles, then the manifests, then sky/v1/models.json and precip/v1/index.json (each
+#                               when SITE has its own) of the manifests in the bucket
 #
 # Needs R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY: an R2 API token with Object Read & Write on the bucket.
 set -euo pipefail
@@ -46,20 +47,32 @@ pull() {
 }
 
 upload() {
-  local site=$1 bucket=$RUNNER_TEMP/bucket keys
+  local site=$1
   # The app sees a run only when its manifest arrives, after all its tiles.
   rclone copy "$site" "$DEST" --include '*.png' "${COPY[@]}" --header-upload "$PNG"
-  # The site's own models.json lists what this job built alone.
-  rclone copy "$site" "$DEST" --filter '- /sky/v1/models.json' --filter '+ *.{json,html}' --filter '- **' "${COPY[@]}" \
-    --header-upload "$JSON"
-  # Every job writes it from all manifests in the bucket. A manifest stays once there (until the lifecycle rule takes
-  # a model dead for days), so two jobs that finish together write the same list; a model that appears for the first
-  # time can miss the other job's list, and the next job adds it.
-  keys=$(python -I -c 'from windtiles.models import MODELS; print(*(f"sky/v1/{m.id}/manifest.json" for m in MODELS))')
+  # The site's own lists name what this job built alone.
+  rclone copy "$site" "$DEST" --filter '- /sky/v1/models.json' --filter '- /precip/v1/index.json' \
+    --filter '+ *.{json,html}' --filter '- **' "${COPY[@]}" --header-upload "$JSON"
+  if [[ -f $site/sky/v1/models.json ]]; then
+    publish_list sky/v1 models.json python -I -m windtiles.models
+  fi
+  if [[ -f $site/precip/v1/index.json ]]; then
+    publish_list precip/v1 index.json python -I -m windtiles.build_precip --index
+  fi
+}
+
+# FAMILY/LIST from the family's manifests of every registry model in the bucket, printed by the rest of the arguments
+# given their directory. Every job writes it so. A manifest stays once there (until the lifecycle rule takes a model
+# dead for days), so two jobs that finish together write the same list; a model that appears for the first time can
+# miss the other job's list, and the next job adds it.
+publish_list() {
+  local family=$1 list=$2 bucket=$RUNNER_TEMP/bucket keys
+  shift 2
+  keys=$(python -I -c "from windtiles.models import MODELS; print(*(f'$family/{m.id}/manifest.json' for m in MODELS))")
   pull "$bucket" $keys
-  python -I -m windtiles.models "$bucket" > "$bucket/models.json"
-  rclone copyto "$bucket/models.json" "$DEST/sky/v1/models.json" "${COPY[@]}" --header-upload "$JSON"
-  cat "$bucket/models.json"
+  "$@" "$bucket" > "$bucket/$list"
+  rclone copyto "$bucket/$list" "$DEST/$family/$list" "${COPY[@]}" --header-upload "$JSON"
+  cat "$bucket/$list"
 }
 
 "$@"

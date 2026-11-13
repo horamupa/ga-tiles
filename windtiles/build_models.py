@@ -1,7 +1,7 @@
 """Build the sky family of the Open-Meteo bucket models: the latest run of each at its `Model.runs` hours into
 sky/v1/{model}, then sky/v1/models.json of every model the site holds.
 
-    .venv/bin/python -I -m windtiles.build_models --out site [--models iconEu hrrr] [--workers 8] [--deployed URL]
+    .venv/bin/python -I -m windtiles.build_models --out site [--models iconEu rrfs] [--workers 8] [--deployed URL]
 """
 
 import argparse
@@ -16,7 +16,7 @@ from windtiles import models, om_source, tiles
 from windtiles.build import SKY_POOLS, _frame, _iso, _output, _write_manifest, deployed_run, write_json
 from windtiles.hazards import CEILING_CAP_FT, M_PER_FT, visibility_sm
 
-VARIABLES = {  # layer → bucket variable and its unit; fog reads visibility, no bucket model has cloud tops
+VARIABLES = {  # layer → bucket variable and its unit; fog reads visibility, cloud_top (RRFS only) is not read
     "clouds": ("cloud_cover", "%"),
     "lowClouds": ("cloud_cover_low", "%"),
     "mediumClouds": ("cloud_cover_mid", "%"),
